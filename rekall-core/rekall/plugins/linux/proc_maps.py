@@ -28,7 +28,7 @@ from rekall.plugins import core
 from rekall.plugins.addrspaces import intel
 from rekall.plugins.common import pfn
 from rekall.plugins.linux import common
-
+import hashlib
 
 class ProcMaps(common.LinProcessFilter):
     """Gathers process maps for linux."""
@@ -124,6 +124,71 @@ class LinVadDump(core.DirectoryDumperMixin, common.LinProcessFilter):
                                    mode='wb') as fd:
                     self.CopyToFile(task_space, vma.vm_start, vma.vm_end, fd)
 
+class LinHashMemPage(core.DirectoryDumperMixin, common.LinProcessFilter):
+    """Hash the given memory page for a process."""
+
+    __name = "hashmempage"
+
+    __args = [
+        dict(name="guestvirtaddr", type="IntParser",
+            help="A guest virtual address."),
+    ]
+
+    def render(self, renderer):
+        for task in self.filter_processes():
+            if not task.mm:
+                continue
+
+            renderer.format("Pid: {0:6}\n", task.pid)
+
+            # Get the task and all process specific information
+            task_space = task.get_process_address_space()
+            name = task.comm
+
+            for vma in task.mm.mmap.walk_list("vm_next"):
+#                if not vma.vm_file:
+#                    continue
+
+                # Skip the entire region.
+                if vma.vm_end < self.plugin_args.guestvirtaddr:
+                    continue
+                if vma.vm_start > self.plugin_args.guestvirtaddr:
+                    continue
+
+                BUFFSIZE = 1024 * 1024
+                addr = self.plugin_args.guestvirtaddr
+                renderer.format(u"Given virtual address : {0}\n", hex(addr))
+                start = addr - (addr & 0xfff)
+                end = start + 0x1000
+
+                filename = "{0}.{1}.{2:08x}-{3:08x}".format(
+                    name, task.pid, start, end)
+                renderer.format(u"Hash {0}\n", filename)
+
+                for run in task_space.get_address_ranges(start=start, end=end):
+                    out_offset = run.start - start
+#                    renderer.format(u"Dumping {0} Mb\n", out_offset / BUFFSIZE)
+                    i = run.start
+
+                    # Now copy the region in fixed size buffers.
+                    while i < run.end:
+                        to_read = min(BUFFSIZE, run.end - i)
+
+                        renderer.format(u"read : {0}~{1}\n", hex(run.start), hex(run.end))
+                        #data = task_space.read(i, to_read)
+                        data = task_space.read(i, 4096)
+
+                        md5 = hashlib.md5()
+                        md5_local = md5.copy()
+                        md5_local.update(data)
+                        checksum = md5_local.hexdigest()
+                        renderer.format(u"checksum of name : {0}\n", checksum)
+
+                        with renderer.open(directory=self.dump_dir,
+                                           filename="test.dmp",
+                                           mode='wb') as fd:
+                            fd.write(data)
+                        i += to_read
 
 class TestLinVadDump(testlib.HashChecker):
     mode = "mode_linux_memory"

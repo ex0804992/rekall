@@ -2154,6 +2154,12 @@
     VAD.
   active_modes:
   - mode_linux_memory
+- plugin: LinHashMemPage
+  name: hashmempage
+  description: |-
+    Hash memory page content with a given guest virtual address.
+  active_modes:
+  - mode_linux_memory
 - plugin: Lister
   name: l
   description: |
